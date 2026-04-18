@@ -217,6 +217,7 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     size_t payload_len;
     size_t declared_len;
     char type_str[16];
+    ObjectID actual;
 
     if (!id || !type_out || !data_out || !len_out) return -1;
 
@@ -241,6 +242,9 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     if (!file_buf) goto fail;
 
     if (fread(file_buf, 1, file_len, fp) != file_len) goto fail;
+
+    compute_hash(file_buf, file_len, &actual);
+    if (memcmp(actual.hash, id->hash, HASH_SIZE) != 0) goto fail;
 
     nul_pos = (unsigned char *)memchr(file_buf, '\0', file_len);
     if (!nul_pos) goto fail;
