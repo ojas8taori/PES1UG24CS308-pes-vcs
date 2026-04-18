@@ -133,6 +133,59 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 
+// test_tree links only tree.o + object.o. Load the index locally here so
+// tree_from_index does not require index.o at link time.
+static int tree_index_load(Index *index) {
+    FILE *f;
+    char line[2048];
+
+    if (!index) return -1;
+    index->count = 0;
+
+    f = fopen(INDEX_FILE, "r");
+    if (!f) return 0; // no index yet -> empty staging area
+
+    while (fgets(line, sizeof(line), f)) {
+        unsigned int mode = 0;
+        unsigned long long mtime = 0;
+        unsigned int size = 0;
+        char hash_hex[HASH_HEX_SIZE + 1];
+        char path[512];
+
+        if (line[0] == '\n' || line[0] == '\0') continue;
+        if (index->count >= MAX_INDEX_ENTRIES) {
+            fclose(f);
+            return -1;
+        }
+
+        if (sscanf(line, "%o %64s %llu %u %511[^\n]",
+                   &mode, hash_hex, &mtime, &size, path) != 5) {
+            fclose(f);
+            return -1;
+        }
+
+        IndexEntry *e = &index->entries[index->count++];
+        e->mode = mode;
+        e->mtime_sec = (uint64_t)mtime;
+        e->size = size;
+
+        size_t plen = strlen(path);
+        if (plen >= sizeof(e->path)) {
+            fclose(f);
+            return -1;
+        }
+        memcpy(e->path, path, plen + 1);
+
+        if (hex_to_hash(hash_hex, &e->hash) != 0) {
+            fclose(f);
+            return -1;
+        }
+    }
+
+    fclose(f);
+    return 0;
+}
+
 static int compare_subdirs(const void *a, const void *b) {
     const char *sa = (const char *)a;
     const char *sb = (const char *)b;
@@ -213,7 +266,9 @@ static int write_tree_recursive(const Index *index, const char *prefix, ObjectID
         TreeEntry *e = &tree.entries[tree.count++];
         e->mode = MODE_DIR;
         e->hash = child_id;
-        snprintf(e->name, sizeof(e->name), "%s", subdirs[i]);
+        size_t dlen = strlen(subdirs[i]);
+        if (dlen >= sizeof(e->name)) return -1;
+        memcpy(e->name, subdirs[i], dlen + 1);
     }
 
     if (tree.count == 0) {
@@ -233,7 +288,7 @@ int tree_from_index(ObjectID *id_out) {
     Index index;
 
     if (!id_out) return -1;
-    if (index_load(&index) != 0) return -1;
+    if (tree_index_load(&index) != 0) return -1;
 
     return write_tree_recursive(&index, "", id_out);
 }
