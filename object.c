@@ -94,6 +94,21 @@ int object_exists(const ObjectID *id) {
 
 //
 // Returns 0 on success, -1 on error.
+
+static int write_all(int fd, const unsigned char *buf, size_t len) {
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = write(fd, buf + off, len - off);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (n == 0) return -1;
+        off += (size_t)n;
+    }
+    return 0;
+}
+
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
     const char *type_str = NULL;
     int fd = -1;
@@ -103,7 +118,10 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     char hex[HASH_HEX_SIZE + 1];
     char shard_dir[512];
     char final_path[512];
-    char tmp_path[512];
+    char tmp_path[512] = {0};
+
+    if (!id_out) return -1;
+    if (len > 0 && !data) return -1;
 
     switch (type) {
         case OBJ_BLOB:   type_str = "blob";   break;
@@ -123,7 +141,7 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     if (!full_obj) return -1;
 
     memcpy(full_obj, header, header_len);
-    if (len > 0 && data) memcpy(full_obj + header_len, data, len);
+    if (len > 0) memcpy(full_obj + header_len, data, len);
 
     compute_hash(full_obj, total_len, id_out);
 
@@ -151,8 +169,7 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     fd = open(tmp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd < 0) goto cleanup;
 
-    ssize_t written = write(fd, full_obj, total_len);
-    if (written != (ssize_t)total_len) goto cleanup;
+    if (write_all(fd, full_obj, total_len) != 0) goto cleanup;
 
     if (fsync(fd) != 0) goto cleanup;
 
@@ -165,21 +182,22 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     if (rename(tmp_path, final_path) != 0) goto cleanup;
 
     dirfd = open(shard_dir, O_RDONLY | O_DIRECTORY);
-    if (dirfd >= 0) {
-        if (fsync(dirfd) != 0) goto cleanup;
-        if (close(dirfd) != 0) {
-            dirfd = -1;
-            goto cleanup;
-        }
+    if (dirfd < 0) goto cleanup;
+
+    if (fsync(dirfd) != 0) goto cleanup;
+
+    if (close(dirfd) != 0) {
         dirfd = -1;
+        goto cleanup;
     }
+    dirfd = -1;
 
     rc = 0;
 
 cleanup:
     if (fd >= 0) close(fd);
     if (dirfd >= 0) close(dirfd);
-    if (rc != 0 && tmp_path[0]) unlink(tmp_path);
+    if (rc != 0 && tmp_path[0] != '\0') unlink(tmp_path);
     free(full_obj);
     return rc;
 }
