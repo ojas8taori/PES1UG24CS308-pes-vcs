@@ -194,12 +194,22 @@ int head_update(const ObjectID *new_commit) {
 //
 // Returns 0 on success, -1 on error.
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    ObjectID tree_id;
+    Commit commit;
+    ObjectID parent_id;
 
     if (!message || !commit_id_out) return -1;
-    if (tree_from_index(&tree_id) != 0) return -1;
 
-    // Tree generation wired. Commit object creation comes next.
-    (void)tree_id;
+    memset(&commit, 0, sizeof(commit));
+
+    if (tree_from_index(&commit.tree) != 0) return -1;
+
+    if (head_read(&parent_id) == 0) {
+        commit.has_parent = 1;
+        commit.parent = parent_id;
+    } else {
+        commit.has_parent = 0; // first commit (or no valid HEAD target yet)
+    }
+
+    // Author/timestamp/serialization will be added next.
     return -1;
 }
