@@ -16,7 +16,6 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include "index.h"
-int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
@@ -132,17 +131,21 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //
 // Returns 0 on success, -1 on error.
 
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+
 static int compare_subdirs(const void *a, const void *b) {
     const char *sa = (const char *)a;
     const char *sb = (const char *)b;
     return strcmp(sa, sb);
 }
+
 static int add_unique_subdir(char subdirs[][256], int *count, const char *name) {
     for (int i = 0; i < *count; i++) {
         if (strcmp(subdirs[i], name) == 0) return 0;
     }
     if (*count >= MAX_TREE_ENTRIES) return -1;
-    snprintf(subdirs[*count], 256, "%s", name);
+    if (strlen(name) >= sizeof(subdirs[*count])) return -1;
+    snprintf(subdirs[*count], sizeof(subdirs[*count]), "%s", name);
     (*count)++;
     return 0;
 }
@@ -184,6 +187,7 @@ static int collect_level_entries(const Index *index,
             if (add_unique_subdir(subdirs, subdir_count_out, dirname) != 0) return -1;
         }
     }
+
     return 0;
 }
 
@@ -193,6 +197,7 @@ static int write_tree_recursive(const Index *index, const char *prefix, ObjectID
     int subdir_count = 0;
 
     if (collect_level_entries(index, prefix, &tree, subdirs, &subdir_count) != 0) return -1;
+
     qsort(subdirs, subdir_count, sizeof(subdirs[0]), compare_subdirs);
 
     for (int i = 0; i < subdir_count; i++) {
@@ -209,6 +214,10 @@ static int write_tree_recursive(const Index *index, const char *prefix, ObjectID
         e->mode = MODE_DIR;
         e->hash = child_id;
         snprintf(e->name, sizeof(e->name), "%s", subdirs[i]);
+    }
+
+    if (tree.count == 0) {
+        return object_write(OBJ_TREE, "", 0, id_out);
     }
 
     void *raw = NULL;
