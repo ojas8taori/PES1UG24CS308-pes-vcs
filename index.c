@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <errno.h>
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
 
@@ -143,8 +144,7 @@ int index_load(Index *index) {
 
     f = fopen(INDEX_FILE, "r");
     if (!f) {
-        // No index yet is valid: treat as empty staging area.
-        return 0;
+        return (errno == ENOENT) ? 0 : -1;
     }
 
     while (fgets(line, sizeof(line), f)) {
@@ -154,14 +154,24 @@ int index_load(Index *index) {
         unsigned int size = 0;
         char hash_hex[HASH_HEX_SIZE + 1];
         char path[512];
+        char extra;
+
+        // Ignore blank lines cleanly
+        if (line[0] == '\n' || line[0] == '\0') continue;
 
         if (index->count >= MAX_INDEX_ENTRIES) {
             fclose(f);
             return -1;
         }
 
-        if (sscanf(line, "%o %64s %llu %u %511[^\n]",
-                   &mode, hash_hex, &mtime, &size, path) != 5) {
+        // Exactly 5 fields expected; reject trailing garbage
+        if (sscanf(line, "%o %64s %llu %u %511[^\n]%c",
+                   &mode, hash_hex, &mtime, &size, path, &extra) != 5) {
+            fclose(f);
+            return -1;
+        }
+
+        if (path[0] == '\0') {
             fclose(f);
             return -1;
         }
@@ -176,6 +186,11 @@ int index_load(Index *index) {
             fclose(f);
             return -1;
         }
+    }
+
+    if (ferror(f)) {
+        fclose(f);
+        return -1;
     }
 
     fclose(f);
