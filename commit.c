@@ -196,6 +196,7 @@ int head_update(const ObjectID *new_commit) {
 int commit_create(const char *message, ObjectID *commit_id_out) {
     Commit commit;
     ObjectID parent_id;
+    ObjectID new_commit_id;
     void *raw = NULL;
     size_t raw_len = 0;
     time_t now;
@@ -223,6 +224,14 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
 
     if (commit_serialize(&commit, &raw, &raw_len) != 0) return -1;
 
+    if (object_write(OBJ_COMMIT, raw, raw_len, &new_commit_id) != 0) {
+        free(raw);
+        return -1;
+    }
     free(raw);
-    return -1;
+
+    if (head_update(&new_commit_id) != 0) return -1;
+
+    *commit_id_out = new_commit_id;
+    return 0;
 }
