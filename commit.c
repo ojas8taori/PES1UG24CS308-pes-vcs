@@ -196,6 +196,9 @@ int head_update(const ObjectID *new_commit) {
 int commit_create(const char *message, ObjectID *commit_id_out) {
     Commit commit;
     ObjectID parent_id;
+    void *raw = NULL;
+    size_t raw_len = 0;
+    time_t now;
 
     if (!message || !commit_id_out) return -1;
 
@@ -207,9 +210,19 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
         commit.has_parent = 1;
         commit.parent = parent_id;
     } else {
-        commit.has_parent = 0; // first commit (or no valid HEAD target yet)
+        commit.has_parent = 0;
     }
 
-    // Author/timestamp/serialization will be added next.
+    snprintf(commit.author, sizeof(commit.author), "%s", pes_author());
+
+    now = time(NULL);
+    if (now == (time_t)-1) return -1;
+    commit.timestamp = (uint64_t)now;
+
+    snprintf(commit.message, sizeof(commit.message), "%s", message);
+
+    if (commit_serialize(&commit, &raw, &raw_len) != 0) return -1;
+
+    free(raw);
     return -1;
 }
