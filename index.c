@@ -156,7 +156,6 @@ int index_load(Index *index) {
         char path[512];
         char extra;
 
-        // Ignore blank lines cleanly
         if (line[0] == '\n' || line[0] == '\0') continue;
 
         if (index->count >= MAX_INDEX_ENTRIES) {
@@ -164,7 +163,6 @@ int index_load(Index *index) {
             return -1;
         }
 
-        // Exactly 5 fields expected; reject trailing garbage
         if (sscanf(line, "%o %64s %llu %u %511[^\n]%c",
                    &mode, hash_hex, &mtime, &size, path, &extra) != 5) {
             fclose(f);
@@ -194,6 +192,8 @@ int index_load(Index *index) {
     }
 
     fclose(f);
+
+    qsort(index->entries, index->count, sizeof(IndexEntry), compare_index_entries_by_path);
     return 0;
 }
 // Save the index to .pes/index atomically.
@@ -215,6 +215,7 @@ static int compare_index_entries_by_path(const void *a, const void *b) {
 
 int index_save(const Index *index) {
     FILE *f = NULL;
+    int dirfd = -1;
     char tmp_path[640];
     Index sorted;
 
@@ -266,6 +267,15 @@ int index_save(const Index *index) {
         return -1;
     }
 
+    dirfd = open(PES_DIR, O_RDONLY | O_DIRECTORY);
+    if (dirfd >= 0) {
+        if (fsync(dirfd) != 0) {
+            close(dirfd);
+            return -1;
+        }
+        close(dirfd);
+    }
+
     return 0;
 }
 // Stage a file for the next commit.
@@ -289,6 +299,7 @@ int index_add(Index *index, const char *path) {
     IndexEntry *entry = NULL;
 
     if (!index || !path) return -1;
+    if (strlen(path) >= sizeof(index->entries[0].path)) return -1;
 
     if (stat(path, &st) != 0) return -1;
     if (!S_ISREG(st.st_mode)) return -1;
@@ -310,7 +321,10 @@ int index_add(Index *index, const char *path) {
         return -1;
     }
 
-    fclose(f);
+    if (fclose(f) != 0) {
+        free(data);
+        return -1;
+    }
 
     if (object_write(OBJ_BLOB, data, len, &blob_id) != 0) {
         free(data);
