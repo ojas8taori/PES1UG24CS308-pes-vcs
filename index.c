@@ -128,6 +128,8 @@ int index_status(const Index *index) {
 
 // ─── TODO: Implement these ───────────────────────────────────────────────────
 
+static int compare_index_entries_by_path(const void *a, const void *b);
+
 // Load the index from .pes/index.
 //
 // HINTS - Useful functions:
