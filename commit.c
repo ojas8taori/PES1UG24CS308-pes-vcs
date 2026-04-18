@@ -200,12 +200,14 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     void *raw = NULL;
     size_t raw_len = 0;
     time_t now;
+    int rc = -1;
 
     if (!message || !commit_id_out) return -1;
+    if (message[0] == '\0') return -1;
 
     memset(&commit, 0, sizeof(commit));
 
-    if (tree_from_index(&commit.tree) != 0) return -1;
+    if (tree_from_index(&commit.tree) != 0) goto cleanup;
 
     if (head_read(&parent_id) == 0) {
         commit.has_parent = 1;
@@ -217,21 +219,21 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     snprintf(commit.author, sizeof(commit.author), "%s", pes_author());
 
     now = time(NULL);
-    if (now == (time_t)-1) return -1;
+    if (now == (time_t)-1) goto cleanup;
     commit.timestamp = (uint64_t)now;
 
     snprintf(commit.message, sizeof(commit.message), "%s", message);
 
-    if (commit_serialize(&commit, &raw, &raw_len) != 0) return -1;
+    if (commit_serialize(&commit, &raw, &raw_len) != 0) goto cleanup;
 
-    if (object_write(OBJ_COMMIT, raw, raw_len, &new_commit_id) != 0) {
-        free(raw);
-        return -1;
-    }
-    free(raw);
+    if (object_write(OBJ_COMMIT, raw, raw_len, &new_commit_id) != 0) goto cleanup;
 
-    if (head_update(&new_commit_id) != 0) return -1;
+    if (head_update(&new_commit_id) != 0) goto cleanup;
 
     *commit_id_out = new_commit_id;
-    return 0;
+    rc = 0;
+
+cleanup:
+    free(raw);
+    return rc;
 }
