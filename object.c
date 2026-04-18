@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <openssl/evp.h>
+#include <errno.h>
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,14 @@ int object_exists(const ObjectID *id) {
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
     const char *type_str = NULL;
+    int fd = -1;
+    int dirfd = -1;
+    int rc = -1;
+    unsigned char *full_obj = NULL;
+    char hex[HASH_HEX_SIZE + 1];
+    char shard_dir[512];
+    char final_path[512];
+    char tmp_path[512];
 
     switch (type) {
         case OBJ_BLOB:   type_str = "blob";   break;
@@ -107,27 +116,72 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     int n = snprintf(header, sizeof(header), "%s %zu", type_str, len);
     if (n < 0 || (size_t)n >= sizeof(header) - 1) return -1;
 
-    size_t header_len = (size_t)n + 1; /* include terminating NUL */
+    size_t header_len = (size_t)n + 1;
     size_t total_len = header_len + len;
 
-    unsigned char *full_obj = (unsigned char *)malloc(total_len);
+    full_obj = (unsigned char *)malloc(total_len);
     if (!full_obj) return -1;
 
     memcpy(full_obj, header, header_len);
-    if (len > 0 && data) {
-        memcpy(full_obj + header_len, data, len);
-    }
+    if (len > 0 && data) memcpy(full_obj + header_len, data, len);
 
     compute_hash(full_obj, total_len, id_out);
 
-    /* Dedupe path is wired; actual write comes in next commit */
     if (object_exists(id_out)) {
-        free(full_obj);
-        return 0;
+        rc = 0;
+        goto cleanup;
     }
 
+    hash_to_hex(id_out, hex);
+
+    if (snprintf(shard_dir, sizeof(shard_dir), "%s/%.2s", OBJECTS_DIR, hex) >= (int)sizeof(shard_dir)) {
+        goto cleanup;
+    }
+
+    if (mkdir(shard_dir, 0755) != 0 && errno != EEXIST) {
+        goto cleanup;
+    }
+
+    object_path(id_out, final_path, sizeof(final_path));
+
+    if (snprintf(tmp_path, sizeof(tmp_path), "%s/.tmp-%ld-%s", shard_dir, (long)getpid(), hex + 2) >= (int)sizeof(tmp_path)) {
+        goto cleanup;
+    }
+
+    fd = open(tmp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) goto cleanup;
+
+    ssize_t written = write(fd, full_obj, total_len);
+    if (written != (ssize_t)total_len) goto cleanup;
+
+    if (fsync(fd) != 0) goto cleanup;
+
+    if (close(fd) != 0) {
+        fd = -1;
+        goto cleanup;
+    }
+    fd = -1;
+
+    if (rename(tmp_path, final_path) != 0) goto cleanup;
+
+    dirfd = open(shard_dir, O_RDONLY | O_DIRECTORY);
+    if (dirfd >= 0) {
+        if (fsync(dirfd) != 0) goto cleanup;
+        if (close(dirfd) != 0) {
+            dirfd = -1;
+            goto cleanup;
+        }
+        dirfd = -1;
+    }
+
+    rc = 0;
+
+cleanup:
+    if (fd >= 0) close(fd);
+    if (dirfd >= 0) close(dirfd);
+    if (rc != 0 && tmp_path[0]) unlink(tmp_path);
     free(full_obj);
-    return -1;
+    return rc;
 }
 
 // Read an object from the store.
