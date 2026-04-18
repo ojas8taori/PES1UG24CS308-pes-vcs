@@ -132,6 +132,11 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //
 // Returns 0 on success, -1 on error.
 
+static int compare_subdirs(const void *a, const void *b) {
+    const char *sa = (const char *)a;
+    const char *sb = (const char *)b;
+    return strcmp(sa, sb);
+}
 static int add_unique_subdir(char subdirs[][256], int *count, const char *name) {
     for (int i = 0; i < *count; i++) {
         if (strcmp(subdirs[i], name) == 0) return 0;
@@ -188,6 +193,7 @@ static int write_tree_recursive(const Index *index, const char *prefix, ObjectID
     int subdir_count = 0;
 
     if (collect_level_entries(index, prefix, &tree, subdirs, &subdir_count) != 0) return -1;
+    qsort(subdirs, subdir_count, sizeof(subdirs[0]), compare_subdirs);
 
     for (int i = 0; i < subdir_count; i++) {
         if (tree.count >= MAX_TREE_ENTRIES) return -1;
