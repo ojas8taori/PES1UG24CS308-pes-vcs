@@ -207,7 +207,77 @@ cleanup:
 // The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // TODO: Implement
-    (void)id; (void)type_out; (void)data_out; (void)len_out;
+    FILE *fp = NULL;
+    unsigned char *file_buf = NULL;
+    void *payload = NULL;
+    long fsize_long;
+    size_t file_len;
+    unsigned char *nul_pos;
+    size_t header_len;
+    size_t payload_len;
+    size_t declared_len;
+    char type_str[16];
+
+    if (!id || !type_out || !data_out || !len_out) return -1;
+
+    *data_out = NULL;
+    *len_out = 0;
+
+    char path[512];
+    object_path(id, path, sizeof(path));
+
+    fp = fopen(path, "rb");
+    if (!fp) return -1;
+
+    if (fseek(fp, 0, SEEK_END) != 0) goto fail;
+    fsize_long = ftell(fp);
+    if (fsize_long < 0) goto fail;
+    if (fseek(fp, 0, SEEK_SET) != 0) goto fail;
+
+    file_len = (size_t)fsize_long;
+    if (file_len == 0) goto fail;
+
+    file_buf = (unsigned char *)malloc(file_len);
+    if (!file_buf) goto fail;
+
+    if (fread(file_buf, 1, file_len, fp) != file_len) goto fail;
+
+    nul_pos = (unsigned char *)memchr(file_buf, '\0', file_len);
+    if (!nul_pos) goto fail;
+
+    header_len = (size_t)(nul_pos - file_buf);
+    if (header_len == 0 || header_len + 1 > file_len) goto fail;
+
+    if (sscanf((char *)file_buf, "%15s %zu", type_str, &declared_len) != 2) goto fail;
+
+    if (strcmp(type_str, "blob") == 0) {
+        *type_out = OBJ_BLOB;
+    } else if (strcmp(type_str, "tree") == 0) {
+        *type_out = OBJ_TREE;
+    } else if (strcmp(type_str, "commit") == 0) {
+        *type_out = OBJ_COMMIT;
+    } else {
+        goto fail;
+    }
+
+    payload_len = file_len - (header_len + 1);
+    if (payload_len != declared_len) goto fail;
+
+    payload = malloc(payload_len ? payload_len : 1);
+    if (!payload) goto fail;
+
+    if (payload_len > 0) memcpy(payload, nul_pos + 1, payload_len);
+
+    *data_out = payload;
+    *len_out = payload_len;
+
+    fclose(fp);
+    free(file_buf);
+    return 0;
+
+fail:
+    if (fp) fclose(fp);
+    free(file_buf);
+    free(payload);
     return -1;
 }
