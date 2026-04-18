@@ -181,20 +181,41 @@ static int collect_level_entries(const Index *index,
     return 0;
 }
 
-int tree_from_index(ObjectID *id_out) {
-    Index index;
-    Tree root;
+static int build_tree_recursive(const Index *index, const char *prefix, Tree *tree_out) {
     char subdirs[MAX_TREE_ENTRIES][256];
     int subdir_count = 0;
+
+    if (collect_level_entries(index, prefix, tree_out, subdirs, &subdir_count) != 0) return -1;
+
+    for (int i = 0; i < subdir_count; i++) {
+        if (tree_out->count >= MAX_TREE_ENTRIES) return -1;
+
+        char child_prefix[512];
+        int n = snprintf(child_prefix, sizeof(child_prefix), "%s%s/", prefix, subdirs[i]);
+        if (n < 0 || n >= (int)sizeof(child_prefix)) return -1;
+
+        Tree child_tree;
+        if (build_tree_recursive(index, child_prefix, &child_tree) != 0) return -1;
+
+        // Subtree discovered; subtree object writing will be wired next commit.
+        TreeEntry *e = &tree_out->entries[tree_out->count++];
+        e->mode = MODE_DIR;
+        memset(e->hash.hash, 0, HASH_SIZE);
+        snprintf(e->name, sizeof(e->name), "%s", subdirs[i]);
+    }
+
+    return 0;
+}
+
+int tree_from_index(ObjectID *id_out) {
+    Index index;
+    Tree root_tree;
 
     if (!id_out) return -1;
     if (index_load(&index) != 0) return -1;
 
-    if (collect_level_entries(&index, "", &root, subdirs, &subdir_count) != 0) return -1;
+    if (build_tree_recursive(&index, "", &root_tree) != 0) return -1;
 
-    // Parsing and grouping wired; recursive subtree writing comes next.
-    (void)root;
-    (void)subdirs;
-    (void)subdir_count;
+    (void)root_tree;
     return -1;
-}}
+}
