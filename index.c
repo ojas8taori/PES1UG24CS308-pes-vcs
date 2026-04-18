@@ -156,7 +156,6 @@ int index_load(Index *index) {
         unsigned int size = 0;
         char hash_hex[HASH_HEX_SIZE + 1];
         char path[512];
-        char extra;
 
         if (line[0] == '\n' || line[0] == '\0') continue;
 
@@ -165,8 +164,8 @@ int index_load(Index *index) {
             return -1;
         }
 
-        if (sscanf(line, "%o %64s %llu %u %511[^\n]%c",
-                   &mode, hash_hex, &mtime, &size, path, &extra) != 5) {
+        if (sscanf(line, "%o %64s %llu %u %511[^\n]",
+                   &mode, hash_hex, &mtime, &size, path) != 5) {
             fclose(f);
             return -1;
         }
@@ -219,30 +218,34 @@ int index_save(const Index *index) {
     FILE *f = NULL;
     int dirfd = -1;
     char tmp_path[640];
-    Index sorted;
+    Index *sorted = NULL;
 
     if (!index) return -1;
 
-    sorted = *index;
-    qsort(sorted.entries, sorted.count, sizeof(IndexEntry), compare_index_entries_by_path);
+    sorted = (Index *)malloc(sizeof(Index));
+    if (!sorted) return -1;
+
+    *sorted = *index;
+    qsort(sorted->entries, sorted->count, sizeof(IndexEntry), compare_index_entries_by_path);
 
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", INDEX_FILE);
 
     f = fopen(tmp_path, "w");
     if (!f) return -1;
 
-    for (int i = 0; i < sorted.count; i++) {
+    for (int i = 0; i < sorted->count; i++) {
         char hex[HASH_HEX_SIZE + 1];
-        hash_to_hex(&sorted.entries[i].hash, hex);
+        hash_to_hex(&sorted->entries[i].hash, hex);
 
         if (fprintf(f, "%o %s %llu %u %s\n",
-                    sorted.entries[i].mode,
+                    sorted->entries[i].mode,
                     hex,
-                    (unsigned long long)sorted.entries[i].mtime_sec,
-                    sorted.entries[i].size,
-                    sorted.entries[i].path) < 0) {
+                    (unsigned long long)sorted->entries[i].mtime_sec,
+                    sorted->entries[i].size,
+                    sorted->entries[i].path) < 0) {
             fclose(f);
             unlink(tmp_path);
+            free(sorted);
             return -1;
         }
     }
@@ -250,22 +253,26 @@ int index_save(const Index *index) {
     if (fflush(f) != 0) {
         fclose(f);
         unlink(tmp_path);
+        free(sorted);
         return -1;
     }
 
     if (fsync(fileno(f)) != 0) {
         fclose(f);
         unlink(tmp_path);
+        free(sorted);
         return -1;
     }
 
     if (fclose(f) != 0) {
         unlink(tmp_path);
+        free(sorted);
         return -1;
     }
 
     if (rename(tmp_path, INDEX_FILE) != 0) {
         unlink(tmp_path);
+        free(sorted);
         return -1;
     }
 
@@ -273,11 +280,13 @@ int index_save(const Index *index) {
     if (dirfd >= 0) {
         if (fsync(dirfd) != 0) {
             close(dirfd);
+            free(sorted);
             return -1;
         }
         close(dirfd);
     }
 
+    free(sorted);
     return 0;
 }
 // Stage a file for the next commit.
