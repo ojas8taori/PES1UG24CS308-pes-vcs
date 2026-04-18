@@ -16,6 +16,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include "index.h"
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
@@ -181,41 +182,43 @@ static int collect_level_entries(const Index *index,
     return 0;
 }
 
-static int build_tree_recursive(const Index *index, const char *prefix, Tree *tree_out) {
+static int write_tree_recursive(const Index *index, const char *prefix, ObjectID *id_out) {
+    Tree tree;
     char subdirs[MAX_TREE_ENTRIES][256];
     int subdir_count = 0;
 
-    if (collect_level_entries(index, prefix, tree_out, subdirs, &subdir_count) != 0) return -1;
+    if (collect_level_entries(index, prefix, &tree, subdirs, &subdir_count) != 0) return -1;
 
     for (int i = 0; i < subdir_count; i++) {
-        if (tree_out->count >= MAX_TREE_ENTRIES) return -1;
+        if (tree.count >= MAX_TREE_ENTRIES) return -1;
 
         char child_prefix[512];
         int n = snprintf(child_prefix, sizeof(child_prefix), "%s%s/", prefix, subdirs[i]);
         if (n < 0 || n >= (int)sizeof(child_prefix)) return -1;
 
-        Tree child_tree;
-        if (build_tree_recursive(index, child_prefix, &child_tree) != 0) return -1;
+        ObjectID child_id;
+        if (write_tree_recursive(index, child_prefix, &child_id) != 0) return -1;
 
-        // Subtree discovered; subtree object writing will be wired next commit.
-        TreeEntry *e = &tree_out->entries[tree_out->count++];
+        TreeEntry *e = &tree.entries[tree.count++];
         e->mode = MODE_DIR;
-        memset(e->hash.hash, 0, HASH_SIZE);
+        e->hash = child_id;
         snprintf(e->name, sizeof(e->name), "%s", subdirs[i]);
     }
 
-    return 0;
+    void *raw = NULL;
+    size_t raw_len = 0;
+    if (tree_serialize(&tree, &raw, &raw_len) != 0) return -1;
+
+    int rc = object_write(OBJ_TREE, raw, raw_len, id_out);
+    free(raw);
+    return rc;
 }
 
 int tree_from_index(ObjectID *id_out) {
     Index index;
-    Tree root_tree;
 
     if (!id_out) return -1;
     if (index_load(&index) != 0) return -1;
 
-    if (build_tree_recursive(&index, "", &root_tree) != 0) return -1;
-
-    (void)root_tree;
-    return -1;
+    return write_tree_recursive(&index, "", id_out);
 }
