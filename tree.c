@@ -15,6 +15,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include "index.h"
 
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
@@ -129,9 +130,71 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //   - object_write    : save that binary buffer to the store as OBJ_TREE
 //
 // Returns 0 on success, -1 on error.
-int tree_from_index(ObjectID *id_out) {
-    // TODO: Implement recursive tree building
-    // (See Lab Appendix for logical steps)
-    (void)id_out;
-    return -1;
+
+static int add_unique_subdir(char subdirs[][256], int *count, const char *name) {
+    for (int i = 0; i < *count; i++) {
+        if (strcmp(subdirs[i], name) == 0) return 0;
+    }
+    if (*count >= MAX_TREE_ENTRIES) return -1;
+    snprintf(subdirs[*count], 256, "%s", name);
+    (*count)++;
+    return 0;
 }
+
+static int collect_level_entries(const Index *index,
+                                 const char *prefix,
+                                 Tree *tree_out,
+                                 char subdirs[][256],
+                                 int *subdir_count_out) {
+    size_t prefix_len = strlen(prefix);
+    tree_out->count = 0;
+    *subdir_count_out = 0;
+
+    for (int i = 0; i < index->count; i++) {
+        const char *path = index->entries[i].path;
+
+        if (prefix_len > 0 && strncmp(path, prefix, prefix_len) != 0) continue;
+
+        const char *rel = path + prefix_len;
+        if (rel[0] == '\0') continue;
+
+        const char *slash = strchr(rel, '/');
+        if (!slash) {
+            if (tree_out->count >= MAX_TREE_ENTRIES) return -1;
+            if (strlen(rel) >= sizeof(tree_out->entries[tree_out->count].name)) return -1;
+
+            TreeEntry *e = &tree_out->entries[tree_out->count++];
+            e->mode = index->entries[i].mode;
+            e->hash = index->entries[i].hash;
+            snprintf(e->name, sizeof(e->name), "%s", rel);
+        } else {
+            size_t dlen = (size_t)(slash - rel);
+            if (dlen == 0 || dlen >= 256) return -1;
+
+            char dirname[256];
+            memcpy(dirname, rel, dlen);
+            dirname[dlen] = '\0';
+
+            if (add_unique_subdir(subdirs, subdir_count_out, dirname) != 0) return -1;
+        }
+    }
+    return 0;
+}
+
+int tree_from_index(ObjectID *id_out) {
+    Index index;
+    Tree root;
+    char subdirs[MAX_TREE_ENTRIES][256];
+    int subdir_count = 0;
+
+    if (!id_out) return -1;
+    if (index_load(&index) != 0) return -1;
+
+    if (collect_level_entries(&index, "", &root, subdirs, &subdir_count) != 0) return -1;
+
+    // Parsing and grouping wired; recursive subtree writing comes next.
+    (void)root;
+    (void)subdirs;
+    (void)subdir_count;
+    return -1;
+}}
