@@ -1,4 +1,4 @@
-# Building PES-VCS — A Version Control System from Scratch
+# Building VCS — A Version Control System from Scratch
 
 **Objective:** Build a local version control system that tracks file changes, stores snapshots efficiently, and supports commit history. Every component maps directly to operating system and filesystem concepts.
 
@@ -33,16 +33,6 @@ make          # Build the pes binary
 make all      # Build pes + test binaries
 make clean    # Remove all build artifacts
 ```
-
-### Author Configuration
-
-PES-VCS reads the author name from the `PES_AUTHOR` environment variable:
-
-```bash
-export PES_AUTHOR="Your Name <PESXUG24CS042>"
-```
-
-If unset, it defaults to `"PES User <pes@localhost>"`.
 
 ### File Inventory
 
@@ -274,7 +264,7 @@ cat .git/refs/heads/main          # See branch pointer
 
 ## What You'll Build
 
-PES-VCS implements five commands across four phases:
+VCS implements five commands across four phases:
 
 ```
 pes init              Create .pes/ repository structure
